@@ -17,7 +17,6 @@
 #define MOTOR_RFORWARD FORWARD
 #define MOTOR_RBACKWARD BACKWARD
 #define DISTANCIA_MIN 20
-#define DISTANCIA_TOL 1.
 #define DISTANCIA_ITERATIONS 5
 #define SERVO_DELAY 1000
 #define TURN_DELAY 400
@@ -39,8 +38,6 @@ float obstaculoEsq, obstaculoDir;
 float obstaculoFrente;
 
 Ultrasonic ultrasonic(15, 14);
-
-
 
 void setup() {
   Serial.begin(9600);
@@ -80,6 +77,7 @@ int noteDurations[] = {
 const int melodyLength = 24;
 
 void playSong(int* songPitches, int* songNoteDuration, int songLength) {
+  //FONTE: https://www.arduino.cc/en/Tutorial/toneMelody
   // iterate over the notes of the melody:
   for (int i = 0; i < songLength; ++i) {
 
@@ -95,18 +93,11 @@ void playSong(int* songPitches, int* songNoteDuration, int songLength) {
     int pauseBetweenNotes = (noteDuration * 1.30);
     delay(pauseBetweenNotes);
     // stop the tone playing:
-    noTone(8);
+    //noTone(BUZZER);
   }
 }
 
 float distanciaObstaculo() { //em CM
-  /*long microsec = ultrasonic.timing();
-  float ret = 0.;
-  while(ret < DISTANCIA_TOL) {
-    ret = ultrasonic.convert(microsec, Ultrasonic::CM);
-  }
-  return ret;
-  */
   float tot = 0;
   for(int i=0; i<DISTANCIA_ITERATIONS; ++i) {
     tot += ultrasonic.Ranging(CM);
@@ -128,8 +119,6 @@ void viraDireita() {
   motorR.run(MOTOR_RBACKWARD);
   motorL.run(MOTOR_LFORWARD);
 }
-
-int i;
 
 void loop() {
   switch(estado) {
@@ -200,79 +189,10 @@ void loop() {
 
     case E_FERROU:
       Serial.println("vish");
-      while(1)
-      {
-        /*tone(BUZZER, 330, 300);
-        delay(600);
-        tone(BUZZER, 440, 300);
-        */
+      while(1) {
         playSong(melody, noteDurations, melodyLength);
-      }//morreu
-      
+      } //morreu
     break;
   }
   delay(16);
-
-  
-  /*
-  
-  motorR.run(FORWARD);
-  motorL.run(FORWARD);
-  for (i=0; i<255; i++) {
-    servo.write(i);
-    motorR.setSpeed(i);  
-//    motorL.setSpeed(i); 
-    delay(3);
- }
- 
-  for (i=255; i!=0; i--) {
-    servo.write(i-255);
-    motorR.setSpeed(i);  
-//    motorL.setSpeed(i); 
-    delay(3);
- }
-
- for (i=0; i<255; i++) {
-    servo.write(i);
-//    motorR.setSpeed(i);  
-    motorL.setSpeed(i); 
-    delay(3);
- }
- 
-  for (i=255; i!=0; i--) {
-    servo.write(i-255);
-//    motorR.setSpeed(i);  
-    motorL.setSpeed(i); 
-    delay(3);
- }
- 
-  motorR.run(BACKWARD);
-  motorL.run(BACKWARD);
-  for (i=0; i<255; i++) {
-    servo.write(i);
-    motorR.setSpeed(i);  
-//    motorL.setSpeed(i); 
-    delay(3);
- }
- 
-  for (i=255; i!=0; i--) {
-    servo.write(i-255);
-    motorR.setSpeed(i);  
-//    motorL.setSpeed(i); 
-    delay(3);
- }
-
- for (i=0; i<255; i++) {
-    servo.write(i);
-//    motorR.setSpeed(i);  
-    motorL.setSpeed(i); 
-    delay(3);
- }
- 
-  for (i=255; i!=0; i--) {
-    servo.write(i-255);
-//    motorR.setSpeed(i);  
-    motorL.setSpeed(i); 
-    delay(3);
- }*/
 }
