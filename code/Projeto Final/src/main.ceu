@@ -1,0 +1,292 @@
+#include "sdl/sdl.ceu"
+#include "c.ceu"
+#include "utils.ceu"
+
+#define CEU_SDL_MODE_FRAME (1000/30)
+
+#define SCREEN_WIDTH 800
+#define SCREEN_HEIGHT 600
+
+#define PI 3.1415926535897932
+
+native/pre do
+    #include "../include/AStar.c"
+    #include "../include/AStarGrid.c"
+end
+
+native _ASPath, _PathNode;
+
+native/pre do
+	##include<math.h>
+	##include<time.h>
+end
+
+native _acos, _atan2;// _sin, _cos;
+native/nohold 
+	_Mix_ReserveChannels,
+	_Mix_HaltChannel,
+    _SDL_RenderCopyEx,
+	_SDL_ShowCursor,
+    _SDL_GetKeyboardState,
+	_SDL_SetTextureAlphaMod,
+	_SDL_SetTextureBlendMode,
+    _SDL_IntersectRectAndLine,
+    _ASPathCreate,
+    _ASPathGetCount,
+    _ASPathGetNode,
+    _loadWorld,
+    _sign,
+    _clamp;
+	
+native/const 
+    _SDL_FLIP_NONE, 
+    _SDL_FLIP_VERTICAL,
+	_SDL_DISABLE;
+
+
+var&? SDL_Init sdl = spawn SDL_Init("Right 2 Live", SCREEN_WIDTH, SCREEN_HEIGHT, SDL_Color(0x00,0x00,0x00,0xFF));
+_SDL_ShowCursor(_SDL_DISABLE);
+
+#include "vecmath.ceu"
+
+
+watching sdl do
+	{srand(time(NULL));}
+
+	_loadWorld("./res/maps/final.map");
+
+	native/const
+        _world, _world_w, _world_h, 
+		_player_x, _player_y,
+        _zombies_x, _zombies_y, _zombies_count;
+
+	var& SDL_Open_Font font = spawn SDL_Open_Font("./res/BloodLust.ttf", 80);
+
+	//CAMERA
+	var SDL_Rect camera = val SDL_Rect( 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT );
+	
+	var u64 chaserID = 0;
+
+    #include "pathfinder.ceu"
+	
+	//MAP
+	#include "floorblock.ceu"
+	pool[] CollisionBlock blocks;
+
+	var int level_width  = _world_w * BLOCK_SIZE;
+	var int level_height = _world_h * BLOCK_SIZE;
+
+	var int i;
+    var int j;
+    var int w=1;
+    _printf("%d x %d with %d\n", _world_w, _world_h, _zombies_count);
+
+	chaserID = 0;
+	//WORLD GENERATION
+    loop i in [0 -> _world_h[ do
+        loop j in [0 -> _world_w[ do
+			var int currentTile;
+			currentTile = _world[j + (i * _world_w)];
+            if (currentTile >= 100) then
+                if (j<_world_w-1 and _world[j+1 + (i * _world_w)] >= 100) then
+                    //Chain blocks together to reduce number of objs
+                    w = w+1;
+                else
+                    spawn CollisionBlock((j-w+1)*BLOCK_SIZE, i*BLOCK_SIZE, w) in blocks;
+                    w = 1;
+                end 
+
+				//Aesthetics
+				/*if (currentTile >= 120) then
+					//Roof edges
+					spawn ObstacleBlock(j, i, &tx_ROOF_EDGE, 90*(currentTile-120)) in roof;
+				else/if (currentTile >= 110) then
+					//Roof corners
+					spawn ObstacleBlock(j, i, &tx_ROOF_CORNER, 90*(currentTile-110)) in roof;
+				else
+					//Box
+					spawn ObstacleBlock(j, i, &tx_CRATES, 0) in roof;
+				end*/
+			/*else
+				//Aesthetics
+				if (currentTile >= 20) then
+					//Sidewalk edges
+					spawn FloorBlock(j, i, &tx_SIDEWALK_EDGE, 90*(currentTile-20)) in floor;
+				else/if (currentTile >= 10) then
+					//Sidewalk corners
+					spawn FloorBlock(j, i, &tx_SIDEWALK_CORNER, 90*(currentTile-10)) in floor;
+				else/if (currentTile==1) then
+					//Asphalt
+					spawn FloorBlock(j, i, &tx_ASPHALT, 0) in floor;
+				end*/
+            end
+            // { printf("%d ", world[@j + (@i * WORLD_W)]); }
+        end
+    end
+
+	#include "bghelper.ceu"
+	spawn BGHelper();
+
+	//EVENTS
+	event void zombieTouchPlayer;
+	event void playerDied;
+	event void retracePaths;
+	
+	//SOUNDTRACK
+	_Mix_ReserveChannels(1);
+	var int voiceChannel = 0;
+	var& SDL_Open_Sound snd_music = spawn SDL_Open_Sound("res/snds/soundtrack_bg.wav");
+	_Mix_PlayChannel(-1, &&snd_music.sound, -1);
+	
+	loop do
+
+		#include "deadzombie.ceu"
+		pool[100] DeadZombie corpses;
+
+		// SHOT
+		#include "shot.ceu"
+		pool[20] Shot shots;	
+
+		#include "healthbar.ceu"
+		var&? HealthHUD healthHud = spawn HealthHUD();
+		
+		//PLAYER
+		#include "player.ceu"
+		var& Player p = spawn Player(_player_x * BLOCK_SIZE + (BLOCK_SIZE>>1), 
+									 _player_y * BLOCK_SIZE + (BLOCK_SIZE>>1));
+
+		var u64 kills = 0;
+
+		// ZOMBIE 
+		
+		#include "zombie.ceu"
+		pool[50] Zombie zombies;
+		var int k;
+		
+		code/await Spawner(var int x, var int y, var int offset) -> FOREVER do
+			var int interval = 5000;
+			var float zhp = 1.0;
+			loop do
+				await (offset)ms;
+				spawn Zombie(x, y, 40 + (_rand()%100), zhp as int) in outer.zombies;
+				interval = _clamp(interval - 50, 750, 5000);
+				zhp = zhp + 0.3;
+				await (interval)ms;
+			end
+		end
+
+		pool[] Spawner spawners;
+
+		loop i in [0 -> _zombies_count[ do
+			spawn Spawner(_zombies_x[i] * BLOCK_SIZE + (BLOCK_SIZE>>1), 
+						 _zombies_y[i] * BLOCK_SIZE + (BLOCK_SIZE>>1), _rand()%2500) in spawners;
+		end
+
+		/*
+		var int i;	
+		loop i in [0 -> 10] do
+			spawn ObstacleBlock(i,0, &tx_ROOF_EDGE, BL_EDGE_DOWN) in roof;
+		end
+
+		loop i in [0 -> 10] do
+			spawn FloorBlock(i,1,&tx_SIDEWALK_EDGE, BL_EDGE_DOWN) in floor;
+		end
+		loop i in [0 -> 10] do
+			var int j;
+			loop j in [1 -> 6] do
+				if(j >= 2) then
+					spawn FloorBlock(i,j,&tx_ASPHALT, 0) in floor;
+				end
+
+			end
+		end
+		loop i in [0 -> 10] do
+			spawn ObstacleBlock(i,8, &tx_CRATES, BL_EDGE_UP) in roof;
+		end
+
+		loop i in [0 -> 10] do
+			spawn FloorBlock(i,7,&tx_SIDEWALK_EDGE, BL_EDGE_UP) in floor;
+		end
+		*/
+		
+			
+		#include "crosshair.ceu"
+		var&? Crosshair crosshair = spawn Crosshair();
+
+		#include "renderhelper.ceu"
+		spawn RenderHelper();
+		
+		//pool[] Render l1;
+		
+		//#include "map.ceu"
+		par/or do
+			every SDL_DT do
+				//emit p.zombieTouch;
+				//_printf(" CAM %d, %d\n", p.playerOrigin_x as int, p.playerOrigin_y as int);
+				// Mover a camera
+				camera.x = (p.playerOrigin_x - SCREEN_WIDTH/2) as int;
+				camera.y = (p.playerOrigin_y - SCREEN_HEIGHT/2) as int;
+				
+				if (camera.x < 0) then
+					camera.x = 0;
+				end
+				if (camera.y < 0) then
+					camera.y = 0;
+				end
+				if( camera.x > level_width - camera.w ) then
+					camera.x = level_width - camera.w;
+				end
+				if( camera.y > level_height - camera.h ) then
+					camera.y = level_height - camera.h;
+				end	
+				//_printf(" CAM %d, %d\n", camera.x as int, camera.y as int);
+				
+				var&? Shot shot;
+				loop shot in shots do
+					var&? Zombie z;
+					loop z in zombies do
+						if (shot? and z? and call Intersects(&shot!.obj, &z!.collision)) then
+							z!.hitPoints = z!.hitPoints - 1;
+							if (z!.hitPoints < 1) then 
+								spawn DeadZombie(z!.collision.x, z!.collision.y, z!.angle as int) in corpses;
+								kills = kills + 1;
+								emit z!.die;
+								emit p.zombieDeath;
+							end 
+							emit shot!.die;
+						end
+					end	
+					
+				end
+				
+			end
+		with
+			loop do
+				await retracePaths;
+				var&? Zombie chaserA;
+				loop chaserA in zombies do
+					emit chaserA!.update_pf(_clamp(-1+(_rand()%3) +(p.playerOrigin_x as int)/BLOCK_SIZE,0,_world_w-1), 
+											_clamp(-1+(_rand()%3) +(p.playerOrigin_y as int)/BLOCK_SIZE,0,_world_h-1));
+					await 50ms;
+				end
+			end 
+		with
+			loop do
+				await zombieTouchPlayer;
+				emit p.zombieTouch;
+			end
+		with
+			await playerDied;
+
+		end
+		
+		_printf("Voce acabou com %lu zumbis.\n", kills);
+		_printf("clique na tela para continuar\n");
+		var _SDL_MouseButtonEvent&& mb;
+		mb = await SDL_MOUSEBUTTONDOWN until mb:button == _SDL_BUTTON_LEFT;
+	
+	end
+	
+end
+
+escape 0;
